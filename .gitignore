@@ -9,3 +9,4 @@ appsettings.Development.json
 .idea/
 .git/
 
+Migrations/
