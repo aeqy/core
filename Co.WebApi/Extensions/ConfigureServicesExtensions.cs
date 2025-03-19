@@ -1,4 +1,6 @@
 using Co.Infrastructure.Data;
+using Co.WebApi.Filters;
+using Co.WebApi.Middlewares;
 using Microsoft.EntityFrameworkCore;
 
 namespace Co.WebApi.Extensions;
@@ -8,7 +10,10 @@ internal static class ConfigureServicesExtensions
     public static void ConfigureServices(this IServiceCollection services, IConfiguration configuration)
     {
         // 添加控制器和API功能
-        services.AddControllers();
+        services.AddControllers(options =>
+        {
+            options.Filters.Add(typeof(ApiResponseFilterAttribute));
+        });
 
         // 添加数据库服务
         services.AddDatabase(configuration);
@@ -75,6 +80,13 @@ internal static class ConfigureServicesExtensions
 
         // 配置Swagger
         app.UseSwaggerDocumentation();
+        
+        // 在 app.UseRouting() 之前添加自定义中间件
+        app.UseMiddleware<CorrelationIdMiddleware>();       // 必须放在最前面，确保所有请求都有 Correlation ID
+        app.UseMiddleware<RequestResponseTimingMiddleware>();
+        app.UseMiddleware<RequestLoggingMiddleware>();       // 通常放在异常处理之后
+        app.UseMiddleware<GlobalExceptionHandlingMiddleware>();// 应该放在 UseRouting 之前, 捕获所有异常
+
 
         // 配置静态文件和路由
         app.UseDefaultFiles(); // Use Default Files
