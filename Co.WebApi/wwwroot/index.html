@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>唯美导航栏</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(to right, #ffecd2, #fcb69f);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .navbar {
+            background-color: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            justify-content: space-around;
+            width: 80%;
+            max-width: 800px;
+        }
+
+        .navbar a {
+            text-decoration: none;
+            color: #333;
+            padding: 15px 20px;
+            display: block;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .navbar a:hover {
+            background-color: #fcb69f;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+<div class="navbar">
+    <a href="#home">首页</a>
+    <a href="/swagger">Swagger</a>
+    
+  <a href="https://github.com/aeqy/aeqy.github.io/issues">留言</a>
+</div>
+</body>
+</html>

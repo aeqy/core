@@ -1,7 +1,7 @@
+using Co.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using OpenIddict.EntityFrameworkCore.Models;
 
 namespace Co.Infrastructure.Data;
 
@@ -18,6 +18,11 @@ public class CoDbContext : IdentityDbContext<IdentityUser<Guid>, IdentityRole<Gu
     {
     }
 
+    public DbSet<RefreshToken> RefreshTokens { get; set; }
+    public DbSet<TokenRevocationLog> TokenRevocationLogs { get; set; }
+    public DbSet<UserLogoutLog> UserLogoutLogs { get; set; }
+
+
     /// <summary>
     /// 配置模型
     /// </summary>
@@ -25,6 +30,10 @@ public class CoDbContext : IdentityDbContext<IdentityUser<Guid>, IdentityRole<Gu
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        // 从程序集中应用实体配置
+        builder.ApplyConfigurationsFromAssembly(typeof(CoDbContext).Assembly);
+
 
         // 配置 Identity 表名
         ConfigureIdentityTable(builder);
