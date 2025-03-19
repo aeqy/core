@@ -1,46 +1,19 @@
-using Co.Infrastructure.Data;
+using Co.WebApi.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 添加控制器
-builder.Services.AddControllers();
-
-// 添加数据库服务
-builder.Services.AddDatabase(builder.Configuration);
-
-// 添加 Swagger 生成器和 UI
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+// 修改服务配置方法，拆分为多个特定扩展方法
+builder.Services.ConfigureServices(builder.Configuration);
 
 var app = builder.Build();
 
-// 配置 HTTP 请求管道
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+// 调用您的扩展方法来配置应用
+await app.Configure();
 
 // 初始化数据库
-if (builder.Configuration.GetValue<bool>("SeedData:Enabled", true))
+if (builder.Configuration.GetValue("SeedData:Enabled", true))
 {
-    using var scope = app.Services.CreateScope();
-    var services = scope.ServiceProvider;
-    try
-    {
-        var seedDataService = services.GetRequiredService<SeedDataService>();
-        await seedDataService.SeedAsync();
-    }
-    catch (Exception ex)
-    {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "初始化数据库时发生错误");
-    }
+   await ConfigureServicesExtensions.InitializeDatabaseAsync(app);
 }
-
-app.UseHttpsRedirection();
-app.UseAuthentication();
-app.UseAuthorization();
-app.MapControllers();
 
 app.Run();
