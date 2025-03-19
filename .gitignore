@@ -10,3 +10,8 @@ appsettings.Development.json
 .git/
 
 Migrations/
+
+# Qodana
+qodana/
+qodana-results/
+.qodana/
