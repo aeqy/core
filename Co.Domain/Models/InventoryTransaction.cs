@@ -1,5 +1,5 @@
-using System;
 using Co.Domain.Events;
+using Co.Domain.Exceptions;
 using Co.Domain.SeedWork;
 using Co.Domain.Utils;
 using Co.Domain.ValueObjects;
