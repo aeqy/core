@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Co.Domain.Interfaces;
+using Co.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Co.Infrastructure.Repositories;
@@ -10,14 +11,14 @@ namespace Co.Infrastructure.Repositories;
 /// <typeparam name="TEntity">实体类型</typeparam>
 public class Repository<TEntity> : IRepository<TEntity> where TEntity : class
 {
-    protected readonly DbContext Context;
+    protected readonly CoDbContext Context;
     protected readonly DbSet<TEntity> DbSet;
 
     /// <summary>
     /// 构造函数
     /// </summary>
     /// <param name="context">数据库上下文</param>
-    public Repository(DbContext context)
+    public Repository(CoDbContext context)
     {
         Context = context ?? throw new ArgumentNullException(nameof(context));
         DbSet = context.Set<TEntity>();

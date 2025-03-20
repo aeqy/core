@@ -45,6 +45,9 @@ internal static class ConfigureServicesExtensions
         // 添加种子数据服务
         services.AddScoped<SeedDataService>();
 
+        // 添加仓储和工作单元
+        services.AddRepositories();
+
         // 添加日志服务
         services.AddLogging(logging => logging.AddConsole()); // 建议替换为 Serilog 或 NLog
 

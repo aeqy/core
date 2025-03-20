@@ -1,13 +1,14 @@
 using Co.Domain.Interfaces;
 using Co.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Co.Infrastructure.Repositories;
 
 /// <summary>
-/// 工作单元实现类，基于EF Core
+/// 异步工作单元实现类
 /// </summary>
-public class UnitOfWork : IUnitOfWork
+public class AsyncUnitOfWork : IAsyncUnitOfWork
 {
     private readonly CoDbContext _dbContext;
     private readonly Dictionary<Type, object> _repositories;
@@ -19,7 +20,7 @@ public class UnitOfWork : IUnitOfWork
     /// 构造函数
     /// </summary>
     /// <param name="dbContext">数据库上下文</param>
-    public UnitOfWork(CoDbContext dbContext)
+    public AsyncUnitOfWork(CoDbContext dbContext)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _repositories = new Dictionary<Type, object>();
@@ -81,19 +82,32 @@ public class UnitOfWork : IUnitOfWork
     /// <summary>
     /// 保存更改
     /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
     /// <returns>受影响的行数</returns>
-    public async Task<int> SaveChangesAsync()
+    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        return await _dbContext.SaveChangesAsync();
+        return await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
     /// 开始事务
     /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
     /// <returns>事务对象</returns>
-    public async Task<IUnitOfWorkTransaction> BeginTransactionAsync()
+    public async Task<IAsyncUnitOfWorkTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
     {
-        return new UnitOfWorkTransaction(await _dbContext.Database.BeginTransactionAsync());
+        return new AsyncUnitOfWorkTransaction(await _dbContext.Database.BeginTransactionAsync(cancellationToken));
+    }
+
+    /// <summary>
+    /// 执行更新SQL语句
+    /// </summary>
+    /// <param name="sql">SQL语句</param>
+    /// <param name="parameters">参数</param>
+    /// <returns>影响的行数</returns>
+    public async Task<int> ExecuteSqlCommandAsync(string sql, params object[] parameters)
+    {
+        return await _dbContext.Database.ExecuteSqlRawAsync(sql, parameters);
     }
 
     /// <summary>
@@ -124,9 +138,9 @@ public class UnitOfWork : IUnitOfWork
 }
 
 /// <summary>
-/// 工作单元事务实现类
+/// 异步工作单元事务实现类
 /// </summary>
-public class UnitOfWorkTransaction : IUnitOfWorkTransaction
+public sealed class AsyncUnitOfWorkTransaction : IAsyncUnitOfWorkTransaction
 {
     private readonly IDbContextTransaction _transaction;
     private bool _disposed;
@@ -135,7 +149,7 @@ public class UnitOfWorkTransaction : IUnitOfWorkTransaction
     /// 构造函数
     /// </summary>
     /// <param name="transaction">数据库事务</param>
-    public UnitOfWorkTransaction(IDbContextTransaction transaction)
+    public AsyncUnitOfWorkTransaction(IDbContextTransaction transaction)
     {
         _transaction = transaction ?? throw new ArgumentNullException(nameof(transaction));
     }
@@ -143,17 +157,19 @@ public class UnitOfWorkTransaction : IUnitOfWorkTransaction
     /// <summary>
     /// 提交事务
     /// </summary>
-    public async Task CommitAsync()
+    /// <param name="cancellationToken">取消令牌</param>
+    public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
-        await _transaction.CommitAsync();
+        await _transaction.CommitAsync(cancellationToken);
     }
 
     /// <summary>
     /// 回滚事务
     /// </summary>
-    public async Task RollbackAsync()
+    /// <param name="cancellationToken">取消令牌</param>
+    public async Task RollbackAsync(CancellationToken cancellationToken = default)
     {
-        await _transaction.RollbackAsync();
+        await _transaction.RollbackAsync(cancellationToken);
     }
 
     /// <summary>
@@ -169,7 +185,7 @@ public class UnitOfWorkTransaction : IUnitOfWorkTransaction
     /// 释放资源
     /// </summary>
     /// <param name="disposing">是否释放托管资源</param>
-    protected virtual void Dispose(bool disposing)
+    private void Dispose(bool disposing)
     {
         if (!_disposed)
         {

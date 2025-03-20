@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Co.Domain.Interfaces;
+using Co.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Co.Infrastructure.Repositories;
@@ -14,7 +15,7 @@ public class AdvancedRepository<TEntity> : Repository<TEntity>, IAdvancedReposit
     /// 构造函数
     /// </summary>
     /// <param name="context">数据库上下文</param>
-    public AdvancedRepository(DbContext context) : base(context)
+    public AdvancedRepository(CoDbContext context) : base(context)
     {
     }
 
