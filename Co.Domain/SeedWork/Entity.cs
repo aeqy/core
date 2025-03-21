@@ -10,7 +10,7 @@ public abstract class Entity
     /// 实体唯一标识
     /// 使用GUID类型，确保分布式环境下的唯一性
     /// </summary>
-    private Guid Id { get; }
+    protected Guid Id { get; init; }
 
     /// <summary>
     /// 默认构造函数
