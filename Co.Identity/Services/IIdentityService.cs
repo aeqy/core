@@ -9,4 +9,5 @@ public interface IIdentityService
     Task<bool> RegisterAsync(RegisterModel model);
     Task<bool> RevokeTokenAsync(string refreshToken);
     Task<bool> ValidateTokenAsync(string token);
+    Task<TokenResponseModel> GenerateTokensAsync(ApplicationUser user, IList<string> roles);
 } 

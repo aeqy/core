@@ -41,4 +41,25 @@ public class RedisTokenCacheService(
             AbsoluteExpirationRelativeToNow = expiryTime
         });
     }
+
+    public async Task SetTwoFactorTokenAsync(string twoFactorToken, string userId, TimeSpan expiryTime)
+    {
+        var key = $"{_keyPrefix}2fa:{twoFactorToken}";
+        await cache.SetStringAsync(key, userId, new DistributedCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = expiryTime
+        });
+    }
+
+    public async Task<string?> GetTwoFactorUserIdAsync(string twoFactorToken)
+    {
+        var key = $"{_keyPrefix}2fa:{twoFactorToken}";
+        return await cache.GetStringAsync(key);
+    }
+
+    public async Task RemoveTwoFactorTokenAsync(string twoFactorToken)
+    {
+        var key = $"{_keyPrefix}2fa:{twoFactorToken}";
+        await cache.RemoveAsync(key);
+    }
 } 

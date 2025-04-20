@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Security.Claims;
 using Co.Identity.Models;
 using Microsoft.AspNetCore;
@@ -9,6 +8,9 @@ using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
+using System.IdentityModel.Tokens.Jwt;
+using System.Text;
+using Co.Identity.Services;
 
 namespace Co.Identity.Controllers;
 
@@ -189,7 +191,7 @@ public class OpenIdController(
             }));
     }
 
-    [HttpGet("~/connect/authorize")]
+    [HttpGet("~/connect/authorize2")]
     public async Task<IActionResult> Authorize()
     {
         var request = HttpContext.GetOpenIddictServerRequest();
@@ -264,8 +266,61 @@ public class OpenIdController(
         // 撤销令牌
         if (!string.IsNullOrEmpty(request.Token))
         {
-            // 处理令牌撤销
-            return Ok();
+            var tokenManager = HttpContext.RequestServices.GetRequiredService<IOpenIddictTokenManager>();
+            var tokenCacheService = HttpContext.RequestServices.GetRequiredService<ITokenCacheService>();
+            
+            // 尝试找到令牌
+            var token = await tokenManager.FindByReferenceIdAsync(request.Token);
+            
+            if (token != null)
+            {
+                // 获取令牌类型
+                var tokenType = await tokenManager.GetTypeAsync(token);
+                var tokenSubject = await tokenManager.GetSubjectAsync(token);
+                
+                // 根据令牌类型采取相应的操作
+                if (tokenType == TokenTypeHints.AccessToken)
+                {
+                    // 撤销访问令牌
+                    await tokenManager.TryRevokeAsync(token);
+                    await tokenCacheService.RevokeTokenAsync(request.Token, TimeSpan.FromHours(1));
+                    _logger.LogInformation("访问令牌已撤销: {TokenId}", request.Token);
+                }
+                else if (tokenType == TokenTypeHints.RefreshToken)
+                {
+                    // 撤销刷新令牌，同时查找并撤销关联的访问令牌
+                    await tokenManager.TryRevokeAsync(token);
+                    
+                    // 尝试从缓存中获取关联的访问令牌
+                    var accessToken = await tokenCacheService.GetAccessTokenAsync(request.Token);
+                    if (!string.IsNullOrEmpty(accessToken))
+                    {
+                        // 撤销关联的访问令牌
+                        await tokenCacheService.RevokeTokenAsync(accessToken, TimeSpan.FromHours(1));
+                        _logger.LogInformation("通过刷新令牌撤销了关联的访问令牌");
+                    }
+                    
+                    // 如果在数据库中找到用户，清除其刷新令牌
+                    if (!string.IsNullOrEmpty(tokenSubject))
+                    {
+                        var user = await userManager.FindByIdAsync(tokenSubject);
+                        if (user != null && user.RefreshToken == request.Token)
+                        {
+                            user.RefreshToken = null;
+                            user.RefreshTokenExpiryTime = null;
+                            await userManager.UpdateAsync(user);
+                        }
+                    }
+                    
+                    _logger.LogInformation("刷新令牌已撤销: {TokenId}", request.Token);
+                }
+            }
+            else
+            {
+                // 如果令牌不在OpenIddict存储中，仍将其标记为已撤销
+                await tokenCacheService.RevokeTokenAsync(request.Token, TimeSpan.FromHours(1));
+                _logger.LogInformation("令牌已添加到撤销列表: {TokenId}", request.Token);
+            }
         }
 
         return Ok();
@@ -277,18 +332,143 @@ public class OpenIdController(
         var request = HttpContext.GetOpenIddictServerRequest() ??
             throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
 
-        // 查询令牌状态
-        if (!string.IsNullOrEmpty(request.Token))
+        // 验证请求是否包含令牌
+        if (string.IsNullOrEmpty(request.Token))
         {
-            // 处理令牌查询
-            return Ok();
+            return BadRequest(new OpenIddictResponse
+            {
+                Error = Errors.InvalidRequest,
+                ErrorDescription = "令牌参数缺失"
+            });
         }
 
-        return BadRequest(new OpenIddictResponse
+        // 获取必要的服务
+        var tokenManager = HttpContext.RequestServices.GetRequiredService<IOpenIddictTokenManager>();
+        var authorizationManager = HttpContext.RequestServices.GetRequiredService<IOpenIddictAuthorizationManager>();
+        var tokenCacheService = HttpContext.RequestServices.GetRequiredService<ITokenCacheService>();
+
+        // 准备响应
+        var response = new OpenIddictResponse();
+        
+        // 设置默认为无效（返回IsActive=false）
+        response.SetParameter("active", false);
+
+        // 检查令牌是否被撤销
+        if (await tokenCacheService.IsTokenRevokedAsync(request.Token))
         {
-            Error = OpenIddictConstants.Errors.InvalidRequest,
-            ErrorDescription = "令牌无效"
-        });
+            return Ok(response);
+        }
+
+        // 尝试从OpenIddict存储中找到令牌
+        var token = await tokenManager.FindByReferenceIdAsync(request.Token);
+        if (token == null)
+        {
+            // 如果是JWT令牌，尝试验证其签名
+            var tokenHandler = new JwtSecurityTokenHandler();
+            if (tokenHandler.CanReadToken(request.Token))
+            {
+                try
+                {
+                    var key = Encoding.UTF8.GetBytes(HttpContext.RequestServices
+                        .GetRequiredService<IConfiguration>()["JWT:Secret"] ?? 
+                        throw new InvalidOperationException("JWT密钥未配置"));
+                        
+                    tokenHandler.ValidateToken(request.Token, new TokenValidationParameters
+                    {
+                        ValidateIssuerSigningKey = true,
+                        IssuerSigningKey = new SymmetricSecurityKey(key),
+                        ValidateIssuer = true,
+                        ValidIssuer = HttpContext.RequestServices.GetRequiredService<IConfiguration>()["JWT:ValidIssuer"],
+                        ValidateAudience = true,
+                        ValidAudience = HttpContext.RequestServices.GetRequiredService<IConfiguration>()["JWT:ValidAudience"],
+                        ValidateLifetime = true,
+                        ClockSkew = TimeSpan.Zero
+                    }, out var validatedToken);
+
+                    var jwtToken = (JwtSecurityToken)validatedToken;
+                    
+                    // 令牌有效，填充响应
+                    response.SetParameter("active", true);
+                    response.SetParameter("sub", jwtToken.Claims.FirstOrDefault(c => c.Type == "sub")?.Value);
+                    response.SetParameter("client_id", jwtToken.Claims.FirstOrDefault(c => c.Type == "aud")?.Value);
+                    response.SetParameter("iat", (long)(jwtToken.ValidFrom - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds);
+                    response.SetParameter("exp", (long)(jwtToken.ValidTo - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds);
+                    response.SetParameter("iss", jwtToken.Issuer);
+                    response.SetParameter("token_type", TokenTypeHints.AccessToken);
+                    
+                    // 提取作用域
+                    var scopeClaim = jwtToken.Claims.FirstOrDefault(c => c.Type == "scope");
+                    if (scopeClaim != null)
+                    {
+                        response.SetParameter("scope", scopeClaim.Value);
+                    }
+                    
+                    // 提取声明
+                    if (jwtToken.Claims.Any(c => !new[] { "iss", "aud", "exp", "nbf", "iat", "jti", "scope" }.Contains(c.Type)))
+                    {
+                        // 对于每个不在排除列表中的声明，单独设置
+                        foreach (var claim in jwtToken.Claims)
+                        {
+                            if (!new[] { "iss", "aud", "exp", "nbf", "iat", "jti", "scope" }.Contains(claim.Type))
+                            {
+                                // 使用单独的键值对形式设置每个声明
+                                response.SetParameter(claim.Type, claim.Value);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // 令牌验证失败，保持Active=false
+                }
+            }
+            
+            return Ok(response);
+        }
+
+        // 如果令牌存在于存储中
+        var authorization = await tokenManager.GetAuthorizationIdAsync(token) != null ?
+            await authorizationManager.FindByIdAsync(await tokenManager.GetAuthorizationIdAsync(token)) : null;
+            
+        // 检查令牌类型和状态
+        var tokenType = await tokenManager.GetTypeAsync(token);
+        var tokenStatus = await tokenManager.GetStatusAsync(token);
+        
+        if (tokenStatus != Statuses.Valid)
+        {
+            return Ok(response); // 令牌状态无效
+        }
+
+        // 设置令牌有效
+        response.SetParameter("active", true);
+        
+        // 填充基本信息
+        response.SetParameter("sub", await tokenManager.GetSubjectAsync(token));
+        response.SetParameter("client_id", await tokenManager.GetIdAsync(token));
+        
+        // 获取创建时间和过期时间
+        var creationDate = await tokenManager.GetCreationDateAsync(token);
+        var expirationDate = await tokenManager.GetExpirationDateAsync(token);
+        
+        if (creationDate.HasValue)
+            response.SetParameter("iat", (long)(creationDate.Value - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds);
+            
+        if (expirationDate.HasValue)
+            response.SetParameter("exp", (long)(expirationDate.Value - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds);
+        
+        response.SetParameter("token_type", tokenType);
+        
+        // 填充作用域信息
+        if (authorization != null)
+        {
+            var scopes = await authorizationManager.GetScopesAsync(authorization);
+            if (scopes.Any())
+            {
+                response.SetParameter("scope", string.Join(" ", scopes));
+            }
+        }
+        
+        return Ok(response);
     }
 
     private static IEnumerable<string> GetDestinations(Claim claim)

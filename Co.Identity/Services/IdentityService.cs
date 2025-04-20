@@ -63,6 +63,7 @@ public class IdentityService(
 
         if (user == null)
         {
+            logger.LogWarning("刷新令牌无效或已过期: {RefreshToken}", refreshToken[..10] + "...");
             return new TokenResponseModel();
         }
 
@@ -73,9 +74,32 @@ public class IdentityService(
         var newAccessToken = GenerateAccessToken(user, userRoles);
         var newRefreshToken = GenerateRefreshToken();
 
+        // 保存旧刷新令牌到撤销列表，避免重放攻击
+        var expiredRefreshToken = user.RefreshToken;
+        
+        // 计算旧刷新令牌的剩余有效期
+        var remainingTime = user.RefreshTokenExpiryTime?.Subtract(DateTime.UtcNow) ?? TimeSpan.Zero;
+        if (remainingTime > TimeSpan.Zero)
+        {
+            // 将令牌加入撤销列表，有效期与原令牌剩余时间相同
+            await context.RevokedTokens.AddAsync(new RevokedToken
+            {
+                Token = expiredRefreshToken,
+                ExpirationTime = DateTime.UtcNow.Add(remainingTime),
+                RevokedAt = DateTime.UtcNow,
+                ReasonRevoked = "Token rotation",
+                UserId = user.Id
+            });
+            await context.SaveChangesAsync();
+            
+            logger.LogInformation("旧刷新令牌已被轮换并撤销: {UserId}", user.Id);
+        }
+
         // 保存新刷新令牌
         user.RefreshToken = newRefreshToken;
         user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+        user.TokenRefreshCount = (user.TokenRefreshCount ?? 0) + 1;
+        user.LastTokenRefreshAt = DateTime.UtcNow;
         await userManager.UpdateAsync(user);
 
         // 返回新令牌
@@ -125,13 +149,42 @@ public class IdentityService(
         var user = await context.Users.SingleOrDefaultAsync(u => u.RefreshToken == refreshToken);
         if (user == null)
         {
+            logger.LogWarning("尝试撤销不存在的刷新令牌");
             return false;
+        }
+
+        // 计算令牌的剩余有效期
+        var remainingTime = user.RefreshTokenExpiryTime?.Subtract(DateTime.UtcNow) ?? TimeSpan.Zero;
+        if (remainingTime > TimeSpan.Zero)
+        {
+            // 将令牌加入撤销列表
+            await context.RevokedTokens.AddAsync(new RevokedToken
+            {
+                Token = refreshToken,
+                ExpirationTime = user.RefreshTokenExpiryTime ?? DateTime.UtcNow.AddDays(1),
+                RevokedAt = DateTime.UtcNow,
+                ReasonRevoked = "User initiated",
+                UserId = user.Id
+            });
         }
 
         // 撤销刷新令牌
         user.RefreshToken = null;
         user.RefreshTokenExpiryTime = null;
         await userManager.UpdateAsync(user);
+        
+        // 保存审计记录
+        await context.AuditLogs.AddAsync(new AuditLog
+        {
+            Action = "TokenRevoke",
+            UserId = user.Id,
+            Timestamp = DateTime.UtcNow,
+            Details = "用户主动撤销刷新令牌"
+        });
+        
+        await context.SaveChangesAsync();
+        
+        logger.LogInformation("用户{UserId}已成功撤销刷新令牌", user.Id);
 
         return true;
     }
@@ -214,5 +267,28 @@ public class IdentityService(
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(randomNumber);
         return Convert.ToBase64String(randomNumber);
+    }
+
+    public async Task<TokenResponseModel> GenerateTokensAsync(ApplicationUser user, IList<string> roles)
+    {
+        // 创建访问令牌
+        var accessToken = GenerateAccessToken(user, roles);
+        var refreshToken = GenerateRefreshToken();
+
+        // 保存刷新令牌
+        user.RefreshToken = refreshToken;
+        user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7); // 刷新令牌7天有效
+        user.LastLoginAt = DateTime.UtcNow;
+        await userManager.UpdateAsync(user);
+
+        // 返回令牌
+        return new TokenResponseModel
+        {
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            ExpiresIn = 3600, // 访问令牌1小时有效
+            TokenType = "Bearer",
+            Scope = "openid profile email"
+        };
     }
 } 

@@ -161,8 +161,26 @@ builder.Services.Configure<HybridCacheOptions>(builder.Configuration.GetSection(
 // 添加自定义服务
 builder.Services.AddTransient<IIdentityService, IdentityService>();
 builder.Services.AddTransient<ITokenCacheService, RedisTokenCacheService>();
+builder.Services.AddTransient<IOtpService, OtpService>();
 builder.Services.AddTransient<ClientConfigurationService>();
 builder.Services.AddTransient<DbInitializerService>();
+
+// 添加CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowTrustedOrigins", policy =>
+    {
+        policy.WithOrigins(
+                builder.Configuration.GetSection("CorsOrigins").Get<string[]>() ?? 
+                new[] { "https://localhost:3000", "https://localhost:5173" })
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
+    });
+});
+
+// 添加控制器和视图
+builder.Services.AddControllersWithViews();
 
 // 构建应用
 var app = builder.Build();
@@ -176,12 +194,17 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseStaticFiles(); // 添加静态文件支持
 app.UseRouting();
+
+// 启用CORS
+app.UseCors("AllowTrustedOrigins");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapDefaultControllerRoute(); // 添加默认控制器路由
 
 // 确保数据库已创建并初始化
 using (var scope = app.Services.CreateScope())
